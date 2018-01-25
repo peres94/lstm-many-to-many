@@ -1,0 +1,130 @@
+# -*- coding: utf-8 -*-
+"""
+
+Created on Wed Jan 24 23:32:04 2018
+Good article about stateful LSTM in keras:
+http://philipperemy.github.io/keras-stateful-lstm/
+Example of stateful keras LSTM
+https://gist.github.com/philipperemy/828c8391c28d141c5beeec7ac6de5624
+About time distributed dense layer, output with TimeDistributedDense should be 3d
+https://github.com/keras-team/keras/issues/5214 - 
+
+@author: pavel
+"""
+
+import pandas as pd; import numpy as np
+from keras.models import Sequential
+from keras.layers import Dense
+from keras.layers import TimeDistributed
+from keras.layers.recurrent import LSTM
+import random
+
+# "hard" task, where next element of sequence of is previous element of input
+# for example:  x = [0.1, 0.2, 0.3, 0.4, 0.5]
+#               y = [0, 0.1, 0.2, 0.3, 0.4]
+X_hard = []
+Y_hard = []  
+X_hard_test = []
+Y_hard_test = []
+for i in range(0, N):
+    y = np.random.uniform(-1, 1, size = 11)
+    x = y[1:]
+    y = y[:-1]
+    Y_hard.append(y)
+    X_hard.append(x)
+for i in range(0, N):
+    y = np.random.uniform(-1, 1, size = 11)
+    x = y[1:]
+    y = y[:-1]
+    Y_hard_test.append(y)
+    X_hard_test.append(x)
+    
+# Model with none. I geass it is the best way to solve this problem.
+# I should shuffle sequences (not elements) in trainig time, but clear view of task is needed now
+# In addition, it has the same mse loss as usual lstm model with fixed sequence length
+model_none = Sequential()
+model_none.add(LSTM(50, input_shape=(None, 1), return_sequences = True))
+model_none.add(TimeDistributed(Dense(1, activation = "tanh")))
+model_none.compile(loss='mse', optimizer='rmsprop')
+# if we skip this loop and make epochs count to 5,
+# model will train on 1 sequence for all epoch!
+# NB: model output should be 3d as Dence layer is time distributed 
+for i in range(0, 5):
+    for k in range(0, N):
+        model_none.fit(np.reshape(Y_hard[k], (1, len(X_hard[k]), 1),), 
+                       np.reshape(Y_hard[k], (1, len(Y_hard[k]), 1)), 
+                       epochs = 1)
+loss_none = np.zeros((N))
+for k in range(0, N):
+    loss_none[k] = model_none.evaluate(np.reshape(Y_hard_test[k], (1, len(X_hard_test[k]), 1),), 
+                       np.reshape(Y_hard_test[k], (1, len(Y_hard_test[k]), 1)))
+print("LSTM with NONE loss: ", loss_none.mean())
+        
+# Stateful model.
+# It a much more slower then model with "None" as size.
+# In addition, loss of stateful in about 20 times bigger then model with "None" as sequence size
+model_stateful = Sequential()
+model_stateful.add(LSTM(50, batch_input_shape=(1, 1, 1), return_sequences = True, stateful = True))
+model_stateful.add(TimeDistributed(Dense(1, activation = "tanh")))
+model_stateful.compile(loss='mse', optimizer='rmsprop')        
+        
+for i in range(0, 5):
+    mean_tr_loss = []
+    for j in range(0, N):
+        for k in range(0, len(Y_hard[j])):
+            model_stateful.train_on_batch(np.reshape(X_hard[j][k], (1, 1, 1)), 
+                                          np.reshape((Y_hard[j][k]), (1, 1, 1)))
+        model_stateful.reset_states()
+
+loss_stateful = []
+for j in range(0, N):
+    for k in range(0, len(Y_hard_test[j])):
+        loss_stateful.append(model_stateful.test_on_batch(np.reshape(X_hard_test[j][k], (1, 1, 1)), 
+                                     np.reshape((Y_hard_test[j][k]), (1, 1, 1))))
+print(np.mean(loss_stateful))
+    
+    
+    
+# fixed input size lstm to test another achitectures
+X_train = np.reshape(np.vstack(X_hard).flatten(), (N, 10, 1))
+Y_train = np.reshape(np.stack(Y_hard), (N, 10, 1))
+model = Sequential()
+model.add(LSTM(100, input_shape=(10, 1), return_sequences = True))
+model.add(TimeDistributed(Dense(1, activation = "tanh")))
+model.compile(loss='mse', optimizer='rmsprop')
+model.fit(X_train, Y_train, epochs = 5, verbose = 1, batch_size = 1)
+        
+# Test LSTM with None as sequence length to sequences with variable length
+# generate "hard" data with variable sequence length
+X_hard = []
+Y_hard = []  
+X_hard_test = []
+Y_hard_test = []
+for i in range(0, N):
+    y = np.random.uniform(-1, 1, size = random.randint(5, 15))
+    x = y[1:]
+    y = y[:-1]
+    Y_hard.append(y)
+    X_hard.append(x)
+for i in range(0, N):
+    y = np.random.uniform(-1, 1, size = random.randint(5, 15))
+    x = y[1:]
+    y = y[:-1]
+    Y_hard_test.append(y)
+    X_hard_test.append(x)
+    
+# train and test lstm with None as sequence size
+model_none = Sequential()
+model_none.add(LSTM(50, input_shape=(None, 1), return_sequences = True))
+model_none.add(TimeDistributed(Dense(1, activation = "tanh")))
+model_none.compile(loss='mse', optimizer='rmsprop')
+for i in range(0, 5):
+    for k in range(0, N):
+        model_none.fit(np.reshape(Y_hard[k], (1, len(X_hard[k]), 1),), 
+                       np.reshape(Y_hard[k], (1, len(Y_hard[k]), 1)), 
+                       epochs = 1)
+loss_none = np.zeros((N))
+for k in range(0, N):
+    loss_none[k] = model_none.evaluate(np.reshape(Y_hard_test[k], (1, len(X_hard_test[k]), 1),), 
+                       np.reshape(Y_hard_test[k], (1, len(Y_hard_test[k]), 1)))
+print(loss_none.mean())
